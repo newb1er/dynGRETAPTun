@@ -10,14 +10,20 @@ import (
 
 const (
 	showIface string = "showif"
+	capture   string = "capture"
+)
+
+var (
+	idxFlag int
 )
 
 func init() {
 	flag.Usage = usage
+	flag.IntVar(&idxFlag, "i", -1, "interface index")
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "Usage: gretool [ showif ]\n")
+	fmt.Fprintf(os.Stderr, "Usage: gretool [ showif | capture ]\n")
 	flag.PrintDefaults()
 }
 
@@ -34,6 +40,12 @@ func main() {
 	switch args[0] {
 	case showIface:
 		netiface.PrintInterfaces()
+	case capture:
+		if idxFlag == -1 {
+			usage()
+			return
+		}
+		netiface.Capture(idxFlag)
 	default:
 		usage()
 		return
