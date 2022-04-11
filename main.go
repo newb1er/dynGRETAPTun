@@ -14,12 +14,12 @@ const (
 )
 
 var (
-	idxFlag int
+	ifFlag string
 )
 
 func init() {
 	flag.Usage = usage
-	flag.IntVar(&idxFlag, "i", -1, "interface index")
+	flag.StringVar(&ifFlag, "i", "", "interface name")
 }
 
 func usage() {
@@ -41,11 +41,16 @@ func main() {
 	case showIface:
 		netiface.PrintInterfaces()
 	case capture:
-		if idxFlag == -1 {
+		if ifFlag == "" {
 			usage()
 			return
 		}
-		netiface.Capture(idxFlag)
+		manager, err := netiface.NewGretapTunManager(ifFlag, "BR")
+		if err != nil {
+			fmt.Print(fmt.Errorf("main: %+v", err.Error()))
+		}
+
+		manager.Start()
 	default:
 		usage()
 		return
