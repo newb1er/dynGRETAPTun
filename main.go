@@ -41,9 +41,9 @@ func interactive() {
 	fmt.Printf("BPF filter expression: \n")
 	inFilter, _ = in.ReadString('\n')
 
-	fmt.Printf("BPF filter expression: %s\n", inFilter)
+	fmt.Printf("BPF filter expression: %s\n", inFilter[:len(inFilter)-1])
 
-	manager, err := netiface.NewGretapTunManager(inIface, "BR", inFilter)
+	manager, err := netiface.NewGretapTunManager(inIface, "BR", inFilter[:len(inFilter)-1])
 	if err != nil {
 		fmt.Print(fmt.Errorf("main: %+v", err.Error()))
 	}
@@ -78,7 +78,7 @@ func main() {
 			fmt.Print(fmt.Errorf("main: %+v", err.Error()))
 		}
 
-		fmt.Printf("BPF filter expression: %s\n", inFilter)
+		fmt.Printf("BPF filter expression: %s", inFilter)
 
 		manager, err := netiface.NewGretapTunManager(ifFlag, "BR", inFilter)
 		if err != nil {
