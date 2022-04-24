@@ -18,13 +18,11 @@ type BPFfilter struct {
 
 func (f BPFfilter) String() string {
 	str := f.base
+	fmt.Printf("excludedIPs: %+v\n", *(f.excludedIPs))
+	fmt.Printf("excludedPorts: %+v\n", *(f.excludedPorts))
 
-	for _, ip := range *f.excludedIPs {
-		str += " and not host " + ip
-	}
-
-	for _, port := range *f.excludedPorts {
-		str += " and not port " + port
+	for _, port := range *(f.excludedPorts) {
+		str += " and port not " + port
 	}
 
 	return str
@@ -78,12 +76,16 @@ func NewGretapTunManager(listenIfaceName string, brName string, BPFbase string) 
 	return m, nil
 }
 
-func (m *gretapTunManager) newTun(ip string) {
+func (m *gretapTunManager) newTun(ip string, sport uint16, dport uint16) {
 	attr := netlink.NewLinkAttrs()
 	m.nextTunNum += 1
 	attr.Name = "GRETAP" + fmt.Sprintf("%d", m.nextTunNum)
 
-	gretap := &netlink.Gretap{Local: net.ParseIP(m.localIP), Remote: net.ParseIP(ip), LinkAttrs: attr}
+	gretap := &netlink.Gretap{
+		Local: net.ParseIP(m.localIP), Remote: net.ParseIP(ip), LinkAttrs: attr,
+		EncapSport: sport, EncapDport: dport,
+		EncapType: netlink.FOU_ENCAP_DIRECT,
+	}
 
 	if err := netlink.LinkAdd(gretap); err != nil {
 		fmt.Print(fmt.Errorf("newTun: %+v", err.Error()))
@@ -150,9 +152,9 @@ func (m *gretapTunManager) listen(pkt gopacket.Packet) {
 	fmt.Printf("\t  Src: %s -> Dst: %s\n", inIPLayer.SrcIP, inIPLayer.DstIP)
 
 	m.filter.addExcludedIP(outIPLayer.SrcIP.String())
-	fmt.Printf("outIPLayer: %+v\n", outIPLayer)
+	m.filter.addExcludedPort(udpLayer.SrcPort.String())
 
-	m.newTun(outIPLayer.SrcIP.String())
+	m.newTun(outIPLayer.SrcIP.String(), uint16(udpLayer.DstPort), uint16(udpLayer.SrcPort))
 }
 
 func (m *gretapTunManager) Start() {
