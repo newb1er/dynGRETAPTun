@@ -18,8 +18,6 @@ type BPFfilter struct {
 
 func (f BPFfilter) String() string {
 	str := f.base
-	fmt.Printf("excludedIPs: %+v\n", *(f.excludedIPs))
-	fmt.Printf("excludedPorts: %+v\n", *(f.excludedPorts))
 
 	for _, port := range *(f.excludedPorts) {
 		str += " and port not " + port
