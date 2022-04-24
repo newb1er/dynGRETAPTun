@@ -11,15 +11,20 @@ import (
 )
 
 type BPFfilter struct {
-	proto       string
-	localIP     *string
-	excludedIPs *[]string
+	base          string
+	excludedIPs   *[]string
+	excludedPorts *[]string
 }
 
 func (f BPFfilter) String() string {
-	str := "proto " + f.proto + " and dst host " + *f.localIP
+	str := f.base
+
 	for _, ip := range *f.excludedIPs {
 		str += " and not host " + ip
+	}
+
+	for _, port := range *f.excludedPorts {
+		str += " and not port " + port
 	}
 
 	return str
@@ -30,20 +35,25 @@ func (f *BPFfilter) addExcludedIP(ip string) {
 	*(f.excludedIPs) = append(*(f.excludedIPs), str)
 }
 
+func (f *BPFfilter) addExcludedPort(port string) {
+	str := strings.Trim(port, " ")
+	*(f.excludedPorts) = append(*(f.excludedPorts), str)
+}
+
 type gretapTunManager struct {
 	localIP     string
 	remoteIP    *[]string
+	remotePort  *[]string
 	brLink      netlink.Link
 	listenIface *net.Interface
 	nextTunNum  int
 	filter      BPFfilter
 }
 
-func NewGretapTunManager(listenIfaceName string, brName string) (*gretapTunManager, error) {
-	strArr := []string{}
-	m := &gretapTunManager{nextTunNum: 0, remoteIP: &strArr}
+func NewGretapTunManager(listenIfaceName string, brName string, BPFbase string) (*gretapTunManager, error) {
+	m := &gretapTunManager{nextTunNum: 0, remoteIP: &[]string{}, remotePort: &[]string{}}
 
-	f := BPFfilter{proto: "GRE", localIP: &m.localIP, excludedIPs: m.remoteIP}
+	f := BPFfilter{base: BPFbase, excludedIPs: m.remoteIP, excludedPorts: m.remotePort}
 	m.filter = f
 
 	if brLink, err := netlink.LinkByName(brName); err != nil {
@@ -52,6 +62,7 @@ func NewGretapTunManager(listenIfaceName string, brName string) (*gretapTunManag
 		m.brLink = brLink
 	}
 
+	fmt.Printf("iface: %+v\n", listenIfaceName)
 	if iface, err := net.InterfaceByName(listenIfaceName); err != nil {
 		return nil, err
 	} else {
@@ -75,15 +86,15 @@ func (m *gretapTunManager) newTun(ip string) {
 	gretap := &netlink.Gretap{Local: net.ParseIP(m.localIP), Remote: net.ParseIP(ip), LinkAttrs: attr}
 
 	if err := netlink.LinkAdd(gretap); err != nil {
-		fmt.Print(fmt.Errorf("newTun: %+v\n", err.Error()))
+		fmt.Print(fmt.Errorf("newTun: %+v", err.Error()))
 	}
 
 	if err := netlink.LinkSetMaster(gretap, m.brLink); err != nil {
-		fmt.Print(fmt.Errorf("newTun: %+v\n", err.Error()))
+		fmt.Print(fmt.Errorf("newTun: %+v", err.Error()))
 	}
 
 	if err := netlink.LinkSetUp(gretap); err != nil {
-		fmt.Print(fmt.Errorf("newTun: %+v\n", err.Error()))
+		fmt.Print(fmt.Errorf("newTun: %+v", err.Error()))
 	}
 }
 
@@ -108,20 +119,43 @@ func (m *gretapTunManager) listen(pkt gopacket.Packet) {
 	fmt.Printf("\tOuter IP Header:\n")
 	fmt.Printf("\t  Src: %s -> Dst: %s\n", outIPLayer.SrcIP, outIPLayer.DstIP)
 
-	greLayer := pkt.Layers()[2].(*layers.GRE)
+	udpLayer := pkt.Layers()[2].(*layers.UDP)
+	fmt.Printf("\tUDP Header:\n")
+	fmt.Printf("\t Src: %d -> Dst: %d\n", udpLayer.SrcPort, udpLayer.DstPort)
+
+	udpPayload := pkt.Layers()[3].(*gopacket.Payload)
+	greLayer := layers.GRE{}
+	if err := greLayer.DecodeFromBytes(
+		udpPayload.LayerContents(), gopacket.NilDecodeFeedback); err != nil {
+		fmt.Print(fmt.Errorf("\tGRE DecodeFromBytes: %+v", err.Error()))
+	}
 	fmt.Printf("\tGRE Header:\n")
 	fmt.Printf("\t  Protocol: %s\n", greLayer.Protocol.LayerType())
 
-	inEthLayer := pkt.Layers()[3].(*layers.Ethernet)
+	inEthLayer := layers.Ethernet{}
+	if err := inEthLayer.DecodeFromBytes(
+		greLayer.Payload, gopacket.NilDecodeFeedback); err != nil {
+		fmt.Print(fmt.Errorf("\tGRE DecodeFromBytes: %+v", err.Error()))
+	}
 	fmt.Printf("\tInner Ethernet Header:\n")
 	fmt.Printf("\t  MAC address: %s -> %s\n", inEthLayer.SrcMAC, inEthLayer.DstMAC)
 	fmt.Printf("\t  Type: %s\n", inEthLayer.EthernetType)
 
+	inIPLayer := layers.IPv4{}
+	if err := inIPLayer.DecodeFromBytes(
+		inEthLayer.Payload, gopacket.NilDecodeFeedback); err != nil {
+		fmt.Print(fmt.Errorf("\tGRE DecodeFromBytes: %+v", err.Error()))
+	}
+	fmt.Printf("\tInner IP Header:\n")
+	fmt.Printf("\t  Src: %s -> Dst: %s\n", inIPLayer.SrcIP, inIPLayer.DstIP)
+
 	m.filter.addExcludedIP(outIPLayer.SrcIP.String())
+	fmt.Printf("outIPLayer: %+v\n", outIPLayer)
 
 	m.newTun(outIPLayer.SrcIP.String())
 }
 
 func (m *gretapTunManager) Start() {
+	print("Starting GRE tunnel manager...\n")
 	Capture(m.listenIface.Index, m.filter, m.listen)
 }
