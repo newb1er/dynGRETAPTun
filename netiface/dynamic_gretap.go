@@ -76,7 +76,7 @@ func NewGretapTunManager(listenIfaceName string, brName string, BPFbase string) 
 	return m, nil
 }
 
-func (m *gretapTunManager) newTun(ip string, sport uint16, dport uint16) {
+func (m *gretapTunManager) newTun(ip string, sport uint16, dport uint16, key uint32) {
 	attr := netlink.NewLinkAttrs()
 	m.nextTunNum += 1
 	attr.Name = "GRETAP" + fmt.Sprintf("%d", m.nextTunNum)
@@ -85,6 +85,7 @@ func (m *gretapTunManager) newTun(ip string, sport uint16, dport uint16) {
 		Local: net.ParseIP(m.localIP), Remote: net.ParseIP(ip), LinkAttrs: attr,
 		EncapSport: sport, EncapDport: dport,
 		EncapType: netlink.FOU_ENCAP_DIRECT,
+		IKey:      key, OKey: key,
 	}
 
 	if err := netlink.LinkAdd(gretap); err != nil {
@@ -154,7 +155,7 @@ func (m *gretapTunManager) listen(pkt gopacket.Packet) {
 	m.filter.addExcludedIP(outIPLayer.SrcIP.String())
 	m.filter.addExcludedPort(udpLayer.SrcPort.String())
 
-	m.newTun(outIPLayer.SrcIP.String(), uint16(udpLayer.DstPort), uint16(udpLayer.SrcPort))
+	m.newTun(outIPLayer.SrcIP.String(), uint16(udpLayer.DstPort), uint16(udpLayer.SrcPort), greLayer.Key)
 }
 
 func (m *gretapTunManager) Start() {
